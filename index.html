@@ -25,6 +25,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@jaames/iro@5/dist/iro.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700;9..40,800&display=swap" rel="stylesheet">
 <style>
@@ -270,7 +271,9 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);min-height:1
   font-family:var(--font);font-size:15px;color:var(--text);background:var(--surface);
   outline:none;transition:border-color .2s,box-shadow .2s;-webkit-appearance:none;appearance:none}
 .fi:focus{border-color:var(--brand);box-shadow:0 0 0 4px var(--brand-glow)}
-select.fi{cursor:pointer}
+select.fi{cursor:pointer;background-color:var(--surface);
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 24 24' fill='none' stroke='%237C5CFC' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
+  background-repeat:no-repeat;background-position:right 14px center;padding-right:42px}
 .row2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 .srow{display:flex;gap:8px}
 .sbtn{flex:1;padding:10px 6px;border:1.5px solid var(--border);border-radius:var(--rsm);
@@ -700,6 +703,13 @@ const diffH = (s,e)=>{if(!s||!e)return 0;const[sh,sm]=s.split(':').map(Number);c
 const TODAY  = dkey(new Date());
 const nowDate= new Date();
 
+/* -- Supabase (schema mei_agenda, dentro do projeto compartilhado saldouvr) -- */
+const SUPABASE_URL = 'https://cefrtcvlfvqsrlshomqc.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_ZG9dmwrjxf4-qhSKBi6f0A__agTy2Rv';
+const supa = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
+  db: { schema: 'mei_agenda' }
+});
+
 /* -- Storage ------------------------------------------------------ */
 const db={
   async get(k){
@@ -810,7 +820,7 @@ function ClientModal({client,company,onSave,onDelete,onClose}){
   const save=()=>{
     if(!name.trim()){alert('Informe o nome do cliente');return;}
     onSave({
-      id:client?.id||Date.now().toString(),
+      id:client?.id||crypto.randomUUID(),
       name:name.trim(),
       location:location.trim(),
       rate:Number(rate)||0,
@@ -1383,22 +1393,11 @@ function CalendarView({workDays,companies,currentDate,onMonthChange,onDayClick,o
     else{setQp(qp?.key===k?null:{key:k,step:dd?'view':'co',coId:dd?.companyId||null,dayData:dd||null});}
   };
 
-  // Escolheu empresa
+  // Escolheu empresa — sempre abre a tela de seleção de cliente
+  // (se não tiver cliente, ela mesma mostra o aviso pra cadastrar um;
+  //  se tiver 1+, dá a chance de ajustar o valor da diária antes de confirmar)
   const pickCompany=coId=>{
-    const co=companies.find(c=>c.id===coId);
-    const cls=co?.clients||[];
-    if(cls.length===0){
-      onQuickSave(qp.key,{status:'worked',companyId:coId,clientId:null,
-        clientName:'',location:'',tipo:'Diária',quantidade:1,rate:0});
-      setQp(null);
-    } else if(cls.length===1){
-      const cl=cls[0];
-      onQuickSave(qp.key,{status:'worked',companyId:coId,clientId:cl.id,
-        clientName:cl.name,location:cl.location||'',tipo:'Diária',quantidade:1,rate:cl.rate||0});
-      setQp(null);
-    } else {
-      setQp(p=>({...p,step:'cl',coId}));
-    }
+    setQp(p=>({...p,step:'cl',coId}));
   };
 
   // Escolheu cliente -> salva com dados do cliente
@@ -3167,23 +3166,100 @@ function LoginScreen({onLogin,onGoRegister}){
   const[loading,setLoading]=useState(false);
   const[err,setErr]=useState('');
 
+  // Recuperação de senha (real — Supabase manda e-mail com link de redefinição)
+  const[forgotMode,setForgotMode]=useState(false);
+  const[fEmail,setFEmail]=useState('');
+  const[fErr,setFErr]=useState('');
+  const[fOk,setFOk]=useState('');
+  const[fLoading,setFLoading]=useState(false);
+
   const handleLogin=async()=>{
     if(!email||!pass){setErr('Preencha e-mail e senha');return;}
     setLoading(true);setErr('');
-    await new Promise(r=>setTimeout(r,600));
-    const stored=await db.get('credentials');
-    if(!stored||stored.email!==email.trim().toLowerCase()){
-      setErr('E-mail não encontrado');setLoading(false);return;
+    const {data,error}=await supa.auth.signInWithPassword({
+      email:email.trim().toLowerCase(),password:pass
+    });
+    if(error){
+      setLoading(false);
+      if(error.message.includes('Invalid login credentials')){setErr('E-mail ou senha incorretos');}
+      else if(error.message.includes('Email not confirmed')){setErr('Confirme seu e-mail antes de entrar — verifique sua caixa de entrada');}
+      else{setErr('Não foi possível entrar. Tente novamente');}
+      return;
     }
-    const passHash=await hashPassword(pass);
-    if(stored.pass!==passHash){
-      setErr('Senha incorreta');setLoading(false);return;
-    }
-    const sessionUser={email:stored.email,name:stored.name,loggedIn:true};
-    await db.set('session',sessionUser);
+    // Busca o perfil (nome etc.) no schema mei_agenda
+    const {data:profile}=await supa.from('profiles').select('*').eq('id',data.user.id).maybeSingle();
+    const sessionUser={id:data.user.id,email:data.user.email,name:profile?.name||'',loggedIn:true};
     setLoading(false);
     onLogin(sessionUser);
   };
+
+  const handleForgot=async()=>{
+    setFErr('');setFOk('');
+    if(!fEmail){setFErr('Digite o e-mail cadastrado');return;}
+    setFLoading(true);
+    const {error}=await supa.auth.resetPasswordForEmail(fEmail.trim().toLowerCase(),{
+      redirectTo:window.location.origin
+    });
+    setFLoading(false);
+    if(error){setFErr('Não foi possível enviar o e-mail. Tente novamente');return;}
+    setFOk('Se esse e-mail estiver cadastrado, você vai receber um link pra redefinir a senha em instantes. Confira também a caixa de spam.');
+  };
+
+  if(forgotMode){
+    return(
+      <div style={{position:'fixed',inset:0,background:'#fff',
+        display:'flex',flexDirection:'column',overflowY:'auto'}}>
+        <div style={{background:'var(--brand)',padding:'52px 28px 40px',flexShrink:0}}>
+          <img src={LOGO_B64} alt="MEI Agenda"
+            style={{width:72,height:54,objectFit:'contain',marginBottom:22}}/>
+          <div style={{fontSize:22,fontWeight:700,color:'#fff',lineHeight:1.25}}>
+            Redefinir senha
+          </div>
+          <div style={{fontSize:13,color:'rgba(255,255,255,.55)',marginTop:6}}>
+            Confirme o e-mail cadastrado e defina uma senha nova
+          </div>
+        </div>
+        <div style={{flex:1,padding:'32px 24px 28px',display:'flex',flexDirection:'column'}}>
+          {[
+            {lbl:'E-mail cadastrado',val:fEmail,set:setFEmail,type:'email',ph:'seu@email.com',ac:'email'},
+          ].map(({lbl,val,set,type,ph,ac})=>(
+            <div key={lbl} style={{marginBottom:16}}>
+              <label style={{display:'block',fontSize:11,fontWeight:600,color:'var(--muted)',
+                letterSpacing:'.8px',textTransform:'uppercase',marginBottom:7}}>{lbl}</label>
+              <input type={type} value={val} onChange={e=>set(e.target.value)}
+                placeholder={ph} autoComplete={ac}
+                style={{width:'100%',padding:'15px 16px',border:'1.5px solid var(--border)',
+                  borderRadius:12,fontFamily:'var(--font)',fontSize:16,color:'var(--text)',
+                  background:'var(--bg)',outline:'none',WebkitAppearance:'none'}}
+                onFocus={e=>{e.target.style.borderColor='var(--brand)';e.target.style.background='#fff';}}
+                onBlur={e=>{e.target.style.borderColor='var(--border)';}}/>
+            </div>
+          ))}
+
+          {fErr&&<div style={{fontSize:13,color:'var(--red)',marginBottom:14,textAlign:'center',fontWeight:500}}>{fErr}</div>}
+          {fOk&&<div style={{fontSize:13,color:'#059669',marginBottom:14,textAlign:'center',fontWeight:600,lineHeight:1.5}}>{fOk}</div>}
+
+          <button onClick={handleForgot} disabled={fLoading}
+            style={{width:'100%',padding:17,background:'var(--brand)',color:'#fff',
+              border:'none',borderRadius:14,fontFamily:'var(--font)',fontSize:16,
+              fontWeight:700,cursor:'pointer',opacity:fLoading?.7:1}}>
+            {fLoading?'Enviando...':'Enviar link de recuperação'}
+          </button>
+
+          <div style={{textAlign:'center',marginTop:20}}>
+            <span onClick={()=>{setForgotMode(false);setFErr('');setFOk('');}}
+              style={{fontSize:13,color:'var(--brand)',fontWeight:600,cursor:'pointer'}}>
+              Voltar para o login
+            </span>
+          </div>
+
+          <div style={{fontSize:11,color:'var(--muted)',marginTop:24,lineHeight:1.5,textAlign:'center'}}>
+            Você vai receber um e-mail com um link seguro pra criar uma senha nova. Seus dados de empresas, clientes e dias registrados não são afetados.
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return(
     <div style={{position:'fixed',inset:0,background:'#fff',
@@ -3233,7 +3309,8 @@ function LoginScreen({onLogin,onGoRegister}){
 
         {/* Esqueci */}
         <div style={{textAlign:'right',marginBottom:28}}>
-          <span style={{fontSize:13,color:'var(--brand)',fontWeight:600,cursor:'pointer'}}>
+          <span onClick={()=>{setForgotMode(true);setFEmail(email);}}
+            style={{fontSize:13,color:'var(--brand)',fontWeight:600,cursor:'pointer'}}>
             Esqueci minha senha
           </span>
         </div>
@@ -3294,20 +3371,65 @@ function RegisterScreen({onRegister,onGoLogin}){
   const lblStyle={display:'block',fontSize:11,fontWeight:600,color:'var(--muted)',
     letterSpacing:'.8px',textTransform:'uppercase',marginBottom:7};
 
+  const[needsConfirm,setNeedsConfirm]=useState(false);
+
   const handleRegister=async()=>{
     if(!name||!email||!pass){setErr('Preencha todos os campos');return;}
     if(pass!==pass2){setErr('As senhas não conferem');return;}
     if(pass.length<6){setErr('Senha precisa ter ao menos 6 caracteres');return;}
     setLoading(true);setErr('');
-    await new Promise(r=>setTimeout(r,600));
-    const passHash=await hashPassword(pass);
-    const credentials={email:email.trim().toLowerCase(),pass:passHash,name};
-    await db.set('credentials',credentials);
-    const newUser={email:credentials.email,name,loggedIn:true};
-    await db.set('session',newUser);
+    const cleanEmail=email.trim().toLowerCase();
+    const {data,error}=await supa.auth.signUp({
+      email:cleanEmail,password:pass,options:{data:{name}}
+    });
+    if(error){
+      setLoading(false);
+      if(error.message.includes('already registered')||error.message.includes('User already registered')){
+        setErr('Esse e-mail já tem uma conta cadastrada');
+      }else{
+        setErr('Não foi possível criar a conta. Tente novamente');
+      }
+      return;
+    }
+    // Cria o perfil explicitamente no schema mei_agenda (não usamos gatilho automático
+    // em auth.users porque essa tabela é compartilhada com o SaldouVR nesse projeto)
+    if(data.user){
+      await supa.from('profiles').insert({id:data.user.id,name,email:cleanEmail});
+    }
     setLoading(false);
-    onRegister(newUser);
+    if(data.session){
+      // E-mail de confirmação desativado — já entra direto
+      onRegister({id:data.user.id,email:cleanEmail,name,loggedIn:true});
+    }else{
+      // Precisa confirmar o e-mail antes de logar
+      setNeedsConfirm(true);
+    }
   };
+
+  if(needsConfirm){
+    return(
+      <div style={{position:'fixed',inset:0,background:'#fff',
+        display:'flex',flexDirection:'column',overflowY:'auto'}}>
+        <div style={{background:'var(--brand)',padding:'52px 28px 40px',flexShrink:0}}>
+          <img src={LOGO_B64} alt="MEI Agenda"
+            style={{width:72,height:54,objectFit:'contain',marginBottom:22}}/>
+          <div style={{fontSize:22,fontWeight:700,color:'#fff',lineHeight:1.25}}>
+            Confirme seu e-mail
+          </div>
+        </div>
+        <div style={{flex:1,padding:'32px 24px 28px'}}>
+          <div style={{fontSize:14,color:'var(--text)',lineHeight:1.6,marginBottom:24}}>
+            Mandamos um link de confirmação pro seu e-mail. Abre a caixa de entrada (ou spam) e toca no link antes de entrar.
+          </div>
+          <button onClick={onGoLogin}
+            style={{width:'100%',padding:17,background:'var(--brand)',color:'#fff',
+              border:'none',borderRadius:14,fontFamily:'var(--font)',fontSize:16,fontWeight:700,cursor:'pointer'}}>
+            Ir para o login
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return(
     <div style={{position:'fixed',inset:0,background:'#fff',
@@ -3366,6 +3488,77 @@ function RegisterScreen({onRegister,onGoLogin}){
 
 /* =================================================== */
 
+function ResetPasswordScreen({onDone}){
+  const[pass,setPass]=useState('');
+  const[pass2,setPass2]=useState('');
+  const[err,setErr]=useState('');
+  const[ok,setOk]=useState(false);
+  const[loading,setLoading]=useState(false);
+
+  const handleSave=async()=>{
+    setErr('');
+    if(!pass||!pass2){setErr('Preencha a senha nos dois campos');return;}
+    if(pass!==pass2){setErr('As senhas não conferem');return;}
+    if(pass.length<6){setErr('Senha precisa ter ao menos 6 caracteres');return;}
+    setLoading(true);
+    const {error}=await supa.auth.updateUser({password:pass});
+    setLoading(false);
+    if(error){setErr('Não foi possível salvar. O link pode ter expirado — peça um novo.');return;}
+    setOk(true);
+  };
+
+  return(
+    <div style={{position:'fixed',inset:0,background:'#fff',
+      display:'flex',flexDirection:'column',overflowY:'auto'}}>
+      <div style={{background:'var(--brand)',padding:'52px 28px 40px',flexShrink:0}}>
+        <img src={LOGO_B64} alt="MEI Agenda"
+          style={{width:72,height:54,objectFit:'contain',marginBottom:22}}/>
+        <div style={{fontSize:22,fontWeight:700,color:'#fff',lineHeight:1.25}}>
+          Definir nova senha
+        </div>
+      </div>
+      <div style={{flex:1,padding:'32px 24px 28px',display:'flex',flexDirection:'column'}}>
+        {ok?(
+          <>
+            <div style={{fontSize:14,color:'#059669',fontWeight:600,marginBottom:24,textAlign:'center'}}>
+              Senha atualizada! Já pode entrar com a senha nova.
+            </div>
+            <button onClick={onDone}
+              style={{width:'100%',padding:17,background:'var(--brand)',color:'#fff',
+                border:'none',borderRadius:14,fontFamily:'var(--font)',fontSize:16,fontWeight:700,cursor:'pointer'}}>
+              Ir para o login
+            </button>
+          </>
+        ):(<>
+          {[
+            {lbl:'Senha nova',val:pass,set:setPass,ph:'Mínimo 6 caracteres'},
+            {lbl:'Confirmar senha nova',val:pass2,set:setPass2,ph:'Repita a senha nova'},
+          ].map(({lbl,val,set,ph})=>(
+            <div key={lbl} style={{marginBottom:16}}>
+              <label style={{display:'block',fontSize:11,fontWeight:600,color:'var(--muted)',
+                letterSpacing:'.8px',textTransform:'uppercase',marginBottom:7}}>{lbl}</label>
+              <input type="password" value={val} onChange={e=>set(e.target.value)}
+                placeholder={ph} autoComplete="new-password"
+                style={{width:'100%',padding:'15px 16px',border:'1.5px solid var(--border)',
+                  borderRadius:12,fontFamily:'var(--font)',fontSize:16,color:'var(--text)',
+                  background:'var(--bg)',outline:'none',WebkitAppearance:'none'}}
+                onFocus={e=>{e.target.style.borderColor='var(--brand)';e.target.style.background='#fff';}}
+                onBlur={e=>{e.target.style.borderColor='var(--border)';}}/>
+            </div>
+          ))}
+          {err&&<div style={{fontSize:13,color:'var(--red)',marginBottom:14,textAlign:'center',fontWeight:500}}>{err}</div>}
+          <button onClick={handleSave} disabled={loading}
+            style={{width:'100%',padding:17,background:'var(--brand)',color:'#fff',
+              border:'none',borderRadius:14,fontFamily:'var(--font)',fontSize:16,
+              fontWeight:700,cursor:'pointer',opacity:loading?.7:1}}>
+            {loading?'Salvando...':'Salvar nova senha'}
+          </button>
+        </>)}
+      </div>
+    </div>
+  );
+}
+
 function App(){
   const[user,setUser]          =useState(null);
   const[companies,setCompanies]=useState([]);
@@ -3386,17 +3579,64 @@ function App(){
   const toastId=useRef(0);
 
   useEffect(()=>{(async()=>{
-    const sess=await db.get('session');
-    const usr=await db.get('user');
-    const cos=await db.get('companies');
-    const wds=await db.get('workdays');
-    if(usr)setUser(usr);
-    if(cos)setCompanies(cos);
-    if(wds)setWorkDays(wds);
     if(localStorage.getItem('meiDark')==='1')document.body.classList.add('dark');
-    if(sess?.loggedIn)setSession(sess);
+
+    // Sessão real do Supabase (não mais localStorage)
+    const {data:{session:sbSession}}=await supa.auth.getSession();
+    if(sbSession){
+      const {data:profile}=await supa.from('profiles').select('*').eq('id',sbSession.user.id).maybeSingle();
+      setSession({id:sbSession.user.id,email:sbSession.user.email,name:profile?.name||'',loggedIn:true});
+    }
     setReady(true);
   })();},[]);
+
+  // Carrega empresas + clientes + dias + perfil do Supabase sempre que a sessão mudar
+  // (login, cadastro, ou sessão já existente ao abrir o app)
+  useEffect(()=>{
+    if(!session?.id)return;
+    (async()=>{
+      const [{data:cos},{data:cls},{data:wds},{data:profile}]=await Promise.all([
+        supa.from('companies').select('*').eq('user_id',session.id),
+        supa.from('clients').select('*').eq('user_id',session.id),
+        supa.from('workdays').select('*').eq('user_id',session.id),
+        supa.from('profiles').select('*').eq('id',session.id).maybeSingle(),
+      ]);
+      const companiesWithClients=(cos||[]).map(co=>({
+        id:co.id,name:co.name,color:co.color,
+        clients:(cls||[]).filter(cl=>cl.company_id===co.id).map(cl=>({
+          id:cl.id,name:cl.name,location:cl.location,rate:cl.rate,color:cl.color
+        }))
+      }));
+      const workDaysObj={};
+      (wds||[]).forEach(w=>{
+        workDaysObj[w.day_key]={
+          status:w.status,companyId:w.company_id,clientId:w.client_id,
+          clientName:w.client_name,location:w.location,tipo:w.tipo,
+          quantidade:w.quantidade,rate:w.rate,obs:w.obs
+        };
+      });
+      setCompanies(companiesWithClients);
+      setWorkDays(workDaysObj);
+      if(profile){
+        setUser({name:profile.name,cnpj:profile.cnpj,cpf:profile.cpf,phone:profile.phone,
+          email:profile.email,city:profile.city,pixKey:profile.pix_key,pixKeyType:profile.pix_key_type});
+      }
+    })();
+  },[session?.id]);
+
+  // Escuta eventos de autenticação — importante pro link de "esqueci minha senha"
+  // que volta do e-mail já autenticado num modo especial de recuperação
+  useEffect(()=>{
+    const {data:listener}=supa.auth.onAuthStateChange((event,sbSession)=>{
+      if(event==='PASSWORD_RECOVERY'){
+        setAuthScreen('reset');
+      }else if(event==='SIGNED_OUT'){
+        setSession(null);
+        setAuthScreen('login');
+      }
+    });
+    return ()=>listener.subscription.unsubscribe();
+  },[]);
 
   useEffect(()=>{if(ready)db.set('user',user);},[user,ready]);
   useEffect(()=>{if(ready)db.set('companies',companies);},[companies,ready]);
@@ -3405,22 +3645,98 @@ function App(){
   const toast=msg=>{const id=++toastId.current;setToastQ(q=>[...q,{id,msg}]);};
   const dismissToast=id=>setToastQ(q=>q.filter(t=>t.id!==id));
 
-  const saveUser=d=>{setUser(d);toast('Perfil salvo OK');};
-  const addCo=d=>{setCompanies(p=>[...p,{...d,id:Date.now().toString()}]);toast('Cliente adicionado OK');};
-  const editCo=d=>{setCompanies(p=>p.map(c=>c.id===d.id?d:c));toast('Cliente atualizado OK');};
-  const delCo=id=>{
+  const saveUser=async(d)=>{
+    setUser(d);
+    if(!session?.id)return;
+    const {error}=await supa.from('profiles').upsert({
+      id:session.id,name:d.name,cnpj:d.cnpj,cpf:d.cpf,phone:d.phone,
+      email:d.email,city:d.city,pix_key:d.pixKey,pix_key_type:d.pixKeyType
+    });
+    toast(error?'Perfil salvo, mas houve erro ao sincronizar':'Perfil salvo OK');
+  };
+
+  const addCo=async(d)=>{
+    const id=crypto.randomUUID();
+    setCompanies(p=>[...p,{...d,id,clients:d.clients||[]}]);
+    if(!session?.id)return;
+    const {error}=await supa.from('companies').insert({id,user_id:session.id,name:d.name,color:d.color});
+    toast(error?'Empresa salva, mas houve erro ao sincronizar':'Empresa adicionada OK');
+  };
+
+  const editCo=async(d)=>{
+    const prevCo=companies.find(c=>c.id===d.id);
+    setCompanies(p=>p.map(c=>c.id===d.id?d:c));
+    if(!session?.id)return;
+    await supa.from('companies').update({name:d.name,color:d.color}).eq('id',d.id);
+    const prevClients=prevCo?.clients||[];
+    const newClients=d.clients||[];
+    const prevIds=new Set(prevClients.map(c=>c.id));
+    const newIds=new Set(newClients.map(c=>c.id));
+    for(const c of prevClients){
+      if(!newIds.has(c.id))await supa.from('clients').delete().eq('id',c.id);
+    }
+    for(const c of newClients){
+      const payload={id:c.id,user_id:session.id,company_id:d.id,name:c.name,location:c.location,rate:c.rate,color:c.color};
+      if(prevIds.has(c.id))await supa.from('clients').update(payload).eq('id',c.id);
+      else await supa.from('clients').insert(payload);
+    }
+    toast('Empresa atualizada OK');
+  };
+
+  const delCo=async(id)=>{
     setCompanies(p=>p.filter(c=>c.id!==id));
     setWorkDays(p=>{const n={...p};Object.keys(n).forEach(k=>{if(n[k].companyId===id)delete n[k];});return n;});
-    toast('Cliente removido');
+    if(session?.id){
+      await supa.from('workdays').delete().eq('user_id',session.id).eq('company_id',id);
+      await supa.from('companies').delete().eq('id',id); // clientes somem junto (cascade)
+    }
+    toast('Empresa removida');
   };
-  const saveDay=(k,data)=>{
+
+  const saveDay=async(k,data)=>{
     setWorkDays(p=>({...p,[k]:data}));
+    if(session?.id){
+      await supa.from('workdays').upsert({
+        user_id:session.id,day_key:k,status:data.status,
+        company_id:data.companyId||null,client_id:data.clientId||null,
+        client_name:data.clientName||'',location:data.location||'',
+        tipo:data.tipo||'',quantidade:data.quantidade||1,
+        rate:data.rate||0,obs:data.obs||''
+      },{onConflict:'user_id,day_key'});
+    }
     const msgs={worked:'Dia registrado OK',dayoff:'Folga marcada OK',available:'Dia liberado OK'};
     toast(msgs[data.status]||'Salvo OK');
   };
-  const delDay=k=>{setWorkDays(p=>{const n={...p};delete n[k];return n;});toast('Registro removido');};
-  const dupDay=(tk,data)=>{setWorkDays(p=>({...p,[tk]:{...data}}));toast(`Copiado para ${fmtD(tk)} OK`);};
-  const deleteAccount=async()=>{await db.set('user',null);await db.set('companies',[]);await db.set('workdays',{});await db.set('session',null);setUser(null);setCompanies([]);setWorkDays({});setSession(null);setAuthScreen('login');setShowDrawer(false);toast('Conta excluída');};
+  const delDay=async(k)=>{
+    setWorkDays(p=>{const n={...p};delete n[k];return n;});
+    if(session?.id)await supa.from('workdays').delete().eq('user_id',session.id).eq('day_key',k);
+    toast('Registro removido');
+  };
+  const dupDay=async(tk,data)=>{
+    setWorkDays(p=>({...p,[tk]:{...data}}));
+    if(session?.id){
+      await supa.from('workdays').upsert({
+        user_id:session.id,day_key:tk,status:data.status,
+        company_id:data.companyId||null,client_id:data.clientId||null,
+        client_name:data.clientName||'',location:data.location||'',
+        tipo:data.tipo||'',quantidade:data.quantidade||1,
+        rate:data.rate||0,obs:data.obs||''
+      },{onConflict:'user_id,day_key'});
+    }
+    toast(`Copiado para ${fmtD(tk)} OK`);
+  };
+  const deleteAccount=async()=>{
+    if(session?.id){
+      await supa.from('workdays').delete().eq('user_id',session.id);
+      await supa.from('clients').delete().eq('user_id',session.id);
+      await supa.from('companies').delete().eq('user_id',session.id);
+      await supa.from('profiles').delete().eq('id',session.id);
+    }
+    await db.set('user',null);await db.set('companies',[]);await db.set('workdays',{});
+    await supa.auth.signOut();
+    setUser(null);setCompanies([]);setWorkDays({});setSession(null);setAuthScreen('login');setShowDrawer(false);
+    toast('Conta excluída');
+  };
 
   const exportData=()=>{
     const backup={version:1,exportedAt:new Date().toISOString(),user,companies,workDays};
@@ -3452,7 +3768,7 @@ function App(){
   const userName=user?.name||session?.email?.split('@')[0]||'';
 
   const handleLogout=async()=>{
-    await db.set('session',null);
+    await supa.auth.signOut();
     setSession(null);
     setAuthScreen('login');
     setShowDrawer(false);
@@ -3470,6 +3786,10 @@ function App(){
       </div>
     </div>
   );
+
+  // Tela de redefinir senha (chegou aqui pelo link do e-mail)
+  if(authScreen==='reset')
+    return <ResetPasswordScreen onDone={()=>{setAuthScreen('login');supa.auth.signOut();}}/>;
 
   // Splash animado - sempre ao abrir o app
   if(authScreen==='splash')
