@@ -729,6 +729,61 @@ const hashPassword=async(pass)=>{
   return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
 };
 
+/* -- Senha: força + campo com olho mágico -------------------------- */
+const getPasswordStrength=(pass)=>{
+  if(!pass)return{score:0,label:'',color:'var(--border)'};
+  if(pass.length<6)return{score:1,label:'Muito curta',color:'#EF4444'};
+  let score=1;
+  if(pass.length>=10)score++;
+  if(/[0-9]/.test(pass)&&/[a-zA-Z]/.test(pass))score++;
+  if(/[^a-zA-Z0-9]/.test(pass)||(/[a-z]/.test(pass)&&/[A-Z]/.test(pass)))score++;
+  if(score<=1)return{score:1,label:'Fraca',color:'#EF4444'};
+  if(score===2)return{score:2,label:'Razoável',color:'#F59E0B'};
+  if(score===3)return{score:3,label:'Boa',color:'#10B981'};
+  return{score:4,label:'Forte',color:'#059669'};
+};
+
+function PasswordStrengthMeter({pass}){
+  if(!pass)return null;
+  const{score,label,color}=getPasswordStrength(pass);
+  return(
+    <div style={{marginTop:8,marginBottom:4}}>
+      <div style={{display:'flex',gap:4,marginBottom:5}}>
+        {[1,2,3,4].map(i=>(
+          <div key={i} style={{flex:1,height:4,borderRadius:2,
+            background:i<=score?color:'var(--border)',transition:'background .2s'}}/>
+        ))}
+      </div>
+      <div style={{fontSize:11,color,fontWeight:700}}>{label}</div>
+    </div>
+  );
+}
+
+function PasswordInput({value,onChange,placeholder,autoComplete}){
+  const[show,setShow]=useState(false);
+  return(
+    <div style={{position:'relative'}}>
+      <input type={show?'text':'password'} value={value} onChange={onChange}
+        placeholder={placeholder} autoComplete={autoComplete}
+        style={{width:'100%',padding:'15px 46px 15px 16px',border:'1.5px solid var(--border)',
+          borderRadius:12,fontFamily:'var(--font)',fontSize:16,color:'var(--text)',
+          background:'var(--bg)',outline:'none',WebkitAppearance:'none'}}
+        onFocus={e=>{e.target.style.borderColor='var(--brand)';e.target.style.background='#fff';}}
+        onBlur={e=>{e.target.style.borderColor='var(--border)';}}/>
+      <button type="button" onClick={()=>setShow(s=>!s)} style={{
+        position:'absolute',right:10,top:0,bottom:0,margin:'auto 0',height:24,
+        background:'none',border:'none',padding:4,cursor:'pointer',
+        color:'var(--muted)',display:'flex',alignItems:'center'}}>
+        {show?(
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M17.94 17.94A10.94 10.94 0 0112 20c-7 0-11-8-11-8a21.6 21.6 0 015.06-6.06M9.9 4.24A10.94 10.94 0 0112 4c7 0 11 8 11 8a21.6 21.6 0 01-2.88 4.14M14.12 14.12a3 3 0 11-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+        ):(
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+        )}
+      </button>
+    </div>
+  );
+}
+
 /* -- Toast -------------------------------------------------------- */
 function Toast({msg,onDone}){
   useEffect(()=>{const t=setTimeout(onDone,2400);return()=>clearTimeout(t);},[]);
@@ -3298,13 +3353,8 @@ function LoginScreen({onLogin,onGoRegister}){
           <label style={{display:'block',fontSize:11,fontWeight:600,
             color:'var(--muted)',letterSpacing:'.8px',textTransform:'uppercase',
             marginBottom:7}}>Senha</label>
-          <input type="password" value={pass} onChange={e=>setPass(e.target.value)}
-            placeholder="........" autoComplete="current-password"
-            style={{width:'100%',padding:'15px 16px',border:'1.5px solid var(--border)',
-              borderRadius:12,fontFamily:'var(--font)',fontSize:16,color:'var(--text)',
-              background:'var(--bg)',outline:'none',WebkitAppearance:'none'}}
-            onFocus={e=>{e.target.style.borderColor='var(--brand)';e.target.style.background='#fff';}}
-            onBlur={e=>{e.target.style.borderColor='var(--border)';}}/>
+          <PasswordInput value={pass} onChange={e=>setPass(e.target.value)}
+            placeholder="........" autoComplete="current-password"/>
         </div>
 
         {/* Esqueci */}
@@ -3455,10 +3505,18 @@ function RegisterScreen({onRegister,onGoLogin}){
         ].map(({lbl,val,set,type,ph,ac})=>(
           <div key={lbl} style={{marginBottom:16}}>
             <label style={lblStyle}>{lbl}</label>
-            <input type={type} value={val} onChange={e=>set(e.target.value)}
-              placeholder={ph} autoComplete={ac} style={inStyle}
-              onFocus={e=>{e.target.style.borderColor='var(--brand)';e.target.style.background='#fff';}}
-              onBlur={e=>{e.target.style.borderColor='var(--border)';}}/>
+            {type==='password'?(
+              <>
+                <PasswordInput value={val} onChange={e=>set(e.target.value)}
+                  placeholder={ph} autoComplete={ac}/>
+                {lbl==='Senha'&&<PasswordStrengthMeter pass={val}/>}
+              </>
+            ):(
+              <input type={type} value={val} onChange={e=>set(e.target.value)}
+                placeholder={ph} autoComplete={ac} style={inStyle}
+                onFocus={e=>{e.target.style.borderColor='var(--brand)';e.target.style.background='#fff';}}
+                onBlur={e=>{e.target.style.borderColor='var(--border)';}}/>
+            )}
           </div>
         ))}
 
@@ -3537,13 +3595,9 @@ function ResetPasswordScreen({onDone}){
             <div key={lbl} style={{marginBottom:16}}>
               <label style={{display:'block',fontSize:11,fontWeight:600,color:'var(--muted)',
                 letterSpacing:'.8px',textTransform:'uppercase',marginBottom:7}}>{lbl}</label>
-              <input type="password" value={val} onChange={e=>set(e.target.value)}
-                placeholder={ph} autoComplete="new-password"
-                style={{width:'100%',padding:'15px 16px',border:'1.5px solid var(--border)',
-                  borderRadius:12,fontFamily:'var(--font)',fontSize:16,color:'var(--text)',
-                  background:'var(--bg)',outline:'none',WebkitAppearance:'none'}}
-                onFocus={e=>{e.target.style.borderColor='var(--brand)';e.target.style.background='#fff';}}
-                onBlur={e=>{e.target.style.borderColor='var(--border)';}}/>
+              <PasswordInput value={val} onChange={e=>set(e.target.value)}
+                placeholder={ph} autoComplete="new-password"/>
+              {lbl==='Senha nova'&&<PasswordStrengthMeter pass={val}/>}
             </div>
           ))}
           {err&&<div style={{fontSize:13,color:'var(--red)',marginBottom:14,textAlign:'center',fontWeight:500}}>{err}</div>}
@@ -3733,7 +3787,7 @@ function App(){
       await supa.from('profiles').delete().eq('id',session.id);
     }
     await db.set('user',null);await db.set('companies',[]);await db.set('workdays',{});
-    await supa.auth.signOut();
+    await supa.auth.signOut({scope:'local'});
     setUser(null);setCompanies([]);setWorkDays({});setSession(null);setAuthScreen('login');setShowDrawer(false);
     toast('Conta excluída');
   };
@@ -3768,7 +3822,7 @@ function App(){
   const userName=user?.name||session?.email?.split('@')[0]||'';
 
   const handleLogout=async()=>{
-    await supa.auth.signOut();
+    await supa.auth.signOut({scope:'local'});
     setSession(null);
     setAuthScreen('login');
     setShowDrawer(false);
@@ -3789,7 +3843,7 @@ function App(){
 
   // Tela de redefinir senha (chegou aqui pelo link do e-mail)
   if(authScreen==='reset')
-    return <ResetPasswordScreen onDone={()=>{setAuthScreen('login');supa.auth.signOut();}}/>;
+    return <ResetPasswordScreen onDone={()=>{setAuthScreen('login');supa.auth.signOut({scope:'local'});}}/>;
 
   // Splash animado - sempre ao abrir o app
   if(authScreen==='splash')
